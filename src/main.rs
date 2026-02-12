@@ -3,7 +3,7 @@
 
 use embedded_hal::{delay::DelayNs, digital::StatefulOutputPin};
 use panic_halt as _;
-use rp2040_hal as hal;
+use rp2040_hal::{self as hal};
 
 #[unsafe(link_section = ".boot2")]
 #[used]
