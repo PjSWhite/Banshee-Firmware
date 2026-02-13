@@ -1,13 +1,15 @@
 #![no_std]
 #![no_main]
 
-use embedded_hal::{delay::DelayNs, digital::StatefulOutputPin};
+use hal::fugit::ExtU32;
 use panic_halt as _;
 use rp2040_hal::{self as hal};
 
 #[unsafe(link_section = ".boot2")]
 #[used]
 pub static BOOT2: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
+
+mod status;
 
 #[hal::entry]
 fn main() -> ! {
@@ -32,11 +34,15 @@ fn main() -> ! {
         &mut pac.RESETS,
     );
 
-    let mut led_pin = pins.gpio25.into_push_pull_output();
-    let mut timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
+    let mut timers = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
 
+    let led_pin = pins.gpio25.into_push_pull_output();
+    let mut status = status::StatusPin::new(led_pin, timers.alarm_0().unwrap());
+
+    watchdog.start(500.millis());
     loop {
-        led_pin.toggle().unwrap();
-        timer.delay_ms(500);
+        status.in_loop();
+
+        watchdog.feed();
     }
 }
