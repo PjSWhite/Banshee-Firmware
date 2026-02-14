@@ -31,6 +31,7 @@ impl<'a> UsbCommandLine<'a> {
                 .serial_number("NULL")])
             .unwrap()
             .device_class(2)
+            // .composite_with_iads()
             .build();
 
         Self {

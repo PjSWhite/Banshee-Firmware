@@ -4,18 +4,14 @@
 use hal::fugit::ExtU32;
 use panic_halt as _;
 use rp2040_hal::{self as hal};
-use usb_device::{
-    bus::UsbBusAllocator,
-    device::{StringDescriptors, UsbDeviceBuilder, UsbVidPid},
-};
-use usbd_serial::SerialPort;
+use usb_device::bus::UsbBusAllocator;
 
 #[unsafe(link_section = ".boot2")]
 #[used]
 pub static BOOT2: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 
 // mod cmd;
-// mod logging;
+mod logging;
 mod status;
 mod time;
 mod usb;
@@ -60,6 +56,9 @@ fn main() -> ! {
     ));
 
     let mut usb = usb::UsbCommandLine::new(&usb_bus);
+    logging::init_logger(log::LevelFilter::Info);
+
+    log::info!("Hello, World!");
 
     // let usb_bus = UsbBusAllocator::new(hal::usb::UsbBus::new(
     //     pac.USBCTRL_REGS,
@@ -86,6 +85,10 @@ fn main() -> ! {
     loop {
         usb.poll();
 
+        // usb.logger.write("PENIS\r\n".as_bytes());
+
+        log::info!("Hello there!");
+
         // if dev.poll(&mut [&mut serial]) {
         //     let mut buf = [0; 32];
 
@@ -104,6 +107,9 @@ fn main() -> ! {
 
         status.in_loop();
 
+        logging::flush_logs(&mut usb.logger);
         watchdog.feed();
+
+        // time::with_timer_mut(|t| t.delay_ms(1));
     }
 }
