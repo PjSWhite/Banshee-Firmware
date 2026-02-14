@@ -15,7 +15,9 @@ use usbd_serial::SerialPort;
 pub static BOOT2: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 
 // mod cmd;
+// mod logging;
 mod status;
+mod time;
 mod usb;
 
 #[hal::entry]
@@ -33,6 +35,9 @@ fn main() -> ! {
     )
     .ok()
     .unwrap();
+
+    time::init_timer(pac.TIMER, &mut pac.RESETS, &clocks);
+
     let sio = hal::Sio::new(pac.SIO);
     let pins = hal::gpio::Pins::new(
         pac.IO_BANK0,
@@ -41,10 +46,10 @@ fn main() -> ! {
         &mut pac.RESETS,
     );
 
-    let mut timers = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
+    // let mut timers = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
 
     let led_pin = pins.gpio25.into_push_pull_output();
-    let mut status = status::StatusPin::new(led_pin, timers.alarm_0().unwrap());
+    let mut status = status::StatusPin::new(led_pin);
 
     let usb_bus = UsbBusAllocator::new(hal::usb::UsbBus::new(
         pac.USBCTRL_REGS,

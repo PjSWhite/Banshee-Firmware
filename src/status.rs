@@ -2,6 +2,8 @@ use embedded_hal::digital::StatefulOutputPin;
 use hal::fugit::ExtU32;
 use rp2040_hal::{self as hal, timer::Alarm};
 
+use crate::time::with_timer_mut;
+
 type ActPin =
     hal::gpio::Pin<hal::gpio::bank0::Gpio25, hal::gpio::FunctionSioOutput, hal::gpio::PullDown>;
 type ActAlarm = hal::timer::Alarm0;
@@ -12,7 +14,9 @@ pub struct StatusPin {
 }
 
 impl StatusPin {
-    pub fn new(act_led: ActPin, alarm: ActAlarm) -> Self {
+    pub fn new(act_led: ActPin) -> Self {
+        let alarm = with_timer_mut(|t| t.alarm_0().unwrap()).unwrap();
+
         Self { act_led, alarm }
     }
 
