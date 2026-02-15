@@ -16,12 +16,12 @@ const LOG_BUFFER_CAPACITY: usize = 64; // theoretical max: 550 (~25% of RAM)
 static GLOBAL_LOGGER: Mutex<RefCell<Option<SerialLogger>>> = Mutex::new(RefCell::new(None));
 static LOGGING_SERVICE: SerialLoggingService = SerialLoggingService;
 
-#[derive(Clone)]
+// #[derive(Clone)]
 struct SerialLogRecord {
     time_ms: u64,
     level: Level,
     target: String<32>,
-    message: String<64>,
+    message: String<256>,
 }
 
 struct SerialLogger {
@@ -38,9 +38,8 @@ impl Log for SerialLoggingService {
                 logger
                     .level
                     .to_level()
-                    .and_then(|l| Some(l <= metadata.level()))
-                    .or(Some(false))
-                    .unwrap()
+                    .map(|l| l <= metadata.level())
+                    .unwrap_or(false)
             } else {
                 false
             }
