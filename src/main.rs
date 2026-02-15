@@ -42,8 +42,6 @@ fn main() -> ! {
         &mut pac.RESETS,
     );
 
-    // let mut timers = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
-
     let led_pin = pins.gpio25.into_push_pull_output();
     let mut status = status::StatusPin::new(led_pin);
 
@@ -60,56 +58,12 @@ fn main() -> ! {
 
     log::info!("Hello, World!");
 
-    // let usb_bus = UsbBusAllocator::new(hal::usb::UsbBus::new(
-    //     pac.USBCTRL_REGS,
-    //     pac.USBCTRL_DPRAM,
-    //     clocks.usb_clock,
-    //     true,
-    //     &mut pac.RESETS,
-    // ));
-
-    // let mut serial = SerialPort::new(&usb_bus);
-
-    // // NOTE: https://pid.codes/howto/
-    // //       We should make our own PID
-    // let mut dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x2e8a, 0x000a))
-    //     .strings(&[StringDescriptors::default()
-    //         .manufacturer("CIT-U SHS SY 2526 STEM-12 ALTRUISM RESEARCH 4 GROUP 3")
-    //         .product("OpenPanahon Station Node")
-    //         .serial_number("NULL")])
-    //     .unwrap()
-    //     .device_class(2)
-    //     .build();
-
     watchdog.start(500.millis());
     loop {
         usb.poll();
-
-        // usb.logger.write("PENIS\r\n".as_bytes());
-
-        // log::info!("Hello there!");
-
-        // if dev.poll(&mut [&mut serial]) {
-        //     let mut buf = [0; 32];
-
-        //     match serial.read(&mut buf) {
-        //         Err(_) | Ok(0) => (),
-        //         Ok(count) => {
-        //             buf.iter_mut()
-        //                 .take(count)
-        //                 .for_each(u8::make_ascii_uppercase);
-
-        //             let reply_buffer = &buf[..count];
-        //             serial.write(reply_buffer).unwrap();
-        //         }
-        //     }
-        // }
-
         status.in_loop();
 
         logging::flush_logs(&mut usb.logger);
         watchdog.feed();
-
-        // time::with_timer_mut(|t| t.delay_ms(1));
     }
 }

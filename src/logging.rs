@@ -25,6 +25,7 @@ struct SerialLogRecord {
 }
 
 struct SerialLogger {
+    level: LevelFilter,
     logs: Deque<SerialLogRecord, LOG_BUFFER_CAPACITY>,
 }
 
@@ -32,16 +33,18 @@ struct SerialLoggingService;
 
 impl Log for SerialLoggingService {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        // temporary short circuit
-        true
-
-        // critical_section::with(|cs| {
-        //     if let Some(logger) = GLOBAL_LOGGER.borrow(cs).borrow().as_ref() {
-        //         logger.level <= metadata.level()
-        //     } else {
-        //         false
-        //     }
-        // })
+        critical_section::with(|cs| {
+            if let Some(logger) = GLOBAL_LOGGER.borrow(cs).borrow().as_ref() {
+                logger
+                    .level
+                    .to_level()
+                    .and_then(|l| Some(l <= metadata.level()))
+                    .or(Some(false))
+                    .unwrap()
+            } else {
+                false
+            }
+        })
     }
 
     fn log(&self, record: &Record) {
@@ -79,8 +82,11 @@ impl Log for SerialLoggingService {
     fn flush(&self) {}
 }
 
-pub fn init_logger<'a>(level: LevelFilter) {
-    let logger = SerialLogger { logs: Deque::new() };
+pub fn init_logger(level: LevelFilter) {
+    let logger = SerialLogger {
+        logs: Deque::new(),
+        level,
+    };
 
     critical_section::with(|cs| GLOBAL_LOGGER.replace(cs, Some(logger)));
 
