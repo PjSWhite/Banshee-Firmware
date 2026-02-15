@@ -6,7 +6,7 @@ use usb_device::{
 use usbd_serial::SerialPort;
 
 pub struct UsbCommandLine<'a> {
-    pub cmdline: SerialPort<'a, hal::usb::UsbBus>,
+    // pub cmdline: SerialPort<'a, hal::usb::UsbBus>,
     pub logger: SerialPort<'a, hal::usb::UsbBus>,
     device: UsbDevice<'a, hal::usb::UsbBus>,
     // allocator: UsbBusAllocator<hal::usb::UsbBus>,
@@ -14,11 +14,11 @@ pub struct UsbCommandLine<'a> {
 
 impl<'a> UsbCommandLine<'a> {
     pub fn new(allocator: &'a UsbBusAllocator<hal::usb::UsbBus>) -> Self {
-        let cmdline = SerialPort::new_with_interface_names(
-            allocator,
-            Some("OpenPanahon Commandline"),
-            Some("cmd"),
-        );
+        // let cmdline = SerialPort::new_with_interface_names(
+        //     allocator,
+        //     Some("OpenPanahon Commandline"),
+        //     Some("cmd"),
+        // );
         let logger =
             SerialPort::new_with_interface_names(allocator, Some("OpenPanahon Log"), Some("log"));
 
@@ -35,13 +35,14 @@ impl<'a> UsbCommandLine<'a> {
             .build();
 
         Self {
-            cmdline,
+            // cmdline,
             logger,
             device,
         }
     }
 
     pub fn poll(&mut self) -> bool {
-        self.device.poll(&mut [&mut self.cmdline, &mut self.logger])
+        self.device.poll(&mut [&mut self.logger])
+        // self.device.poll(&mut [&mut self.cmdline, &mut self.logger])
     }
 }
