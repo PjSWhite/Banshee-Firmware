@@ -71,7 +71,7 @@ impl Log for SerialLoggingService {
 
         critical_section::with(|cs| {
             if let Some(logger) = GLOBAL_LOGGER.borrow(cs).borrow_mut().as_mut() {
-                logger.logs.push_back(new_record);
+                let _ = logger.logs.push_back(new_record);
             }
         });
     }
@@ -85,9 +85,9 @@ pub fn init_logger<'a>(level: LevelFilter) {
     critical_section::with(|cs| GLOBAL_LOGGER.replace(cs, Some(logger)));
 
     unsafe {
-        log::set_logger_racy(&LOGGING_SERVICE).map(|()| {
+        if let Ok(()) = log::set_logger_racy(&LOGGING_SERVICE) {
             log::set_max_level_racy(level);
-        });
+        }
     }
 }
 
@@ -99,11 +99,12 @@ pub fn flush_logs<'a>(serial_port: &mut SerialLoggerPort<'a>) {
         let logger = global_logger.as_mut().unwrap();
 
         if !serial_port.dtr() {
+            // log::info!("Connection with Logging Interface established");
+            // log::info!("Dumping everything :3");
             return;
         }
 
         while let Some(record) = logger.logs.pop_front() {
-            // the serial port doesnt support writeln!
             let args = format_args!(
                 "[{}] [{}/{}] {}\r\n",
                 record.time_ms,
@@ -113,8 +114,6 @@ pub fn flush_logs<'a>(serial_port: &mut SerialLoggerPort<'a>) {
             );
 
             let _ = serial_port.write_fmt(args);
-
-            // serial_port.write_fmt(fmt)
         }
 
         let _ = serial_port.flush();

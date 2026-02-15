@@ -87,7 +87,7 @@ fn main() -> ! {
 
         // usb.logger.write("PENIS\r\n".as_bytes());
 
-        log::info!("Hello there!");
+        // log::info!("Hello there!");
 
         // if dev.poll(&mut [&mut serial]) {
         //     let mut buf = [0; 32];

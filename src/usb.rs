@@ -28,7 +28,7 @@ impl<'a> UsbCommandLine<'a> {
             .strings(&[StringDescriptors::default()
                 .manufacturer("CIT-U SHS SY 2526 STEM-12 ALTRUISM RESEARCH 4 GROUP 3")
                 .product("OpenPanahon Station Node")
-                .serial_number("NULL")])
+                .serial_number("PROTOTYPE-REV1")])
             .unwrap()
             .device_class(2)
             // .composite_with_iads()
