@@ -1,10 +1,10 @@
 #![no_std]
 #![no_main]
 
-use embedded_hal::{delay::DelayNs, i2c::I2c};
 use hal::fugit::{ExtU32, RateExtU32};
+use log::{error, info};
 use panic_halt as _;
-use rp2040_hal::{self as hal, Clock, timer::Alarm};
+use rp2040_hal::{self as hal, Clock};
 use usb_device::bus::UsbBusAllocator;
 
 #[unsafe(link_section = ".boot2")]
@@ -13,7 +13,7 @@ pub static BOOT2: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 
 // mod cmd;
 mod logging;
-mod pms7003;
+mod sensors;
 mod status;
 mod time;
 mod usb;
@@ -59,13 +59,7 @@ fn main() -> ! {
     logging::init_logger(log::LevelFilter::Info);
     log::info!("Hello, World!");
 
-    let pms_cmd_passive = [0x42, 0x4d, 0xe1, 0x00, 0x00, 0x01, 0x70];
-    let pms_cmd_passive_read = [0x42, 0x4d, 0xe2, 0x00, 0x00, 0x01, 0x71];
-    let pms_cmd_wake = [0x42, 0x4d, 0xe4, 0x00, 0x01, 0x01, 0x74];
-    let pms_cmd_sleep = [0x42, 0x4d, 0xe4, 0x00, 0x00, 0x01, 0x73];
-    let mut pms_resp = [0; 32];
-
-    let mut pms7003 = hal::uart::UartPeripheral::new(
+    let pms7003_uart = hal::uart::UartPeripheral::new(
         pac.UART0,
         (pins.gpio0.into_function(), pins.gpio1.into_function()),
         &mut pac.RESETS,
@@ -80,27 +74,71 @@ fn main() -> ! {
         clocks.peripheral_clock.freq(),
     )
     .unwrap();
+    let pms7003_timer = time::with_timer_mut(|t| t.alarm_1().unwrap()).unwrap();
 
-    pms7003.write_full_blocking(&pms_cmd_wake);
-    pms7003.write_full_blocking(&pms_cmd_passive);
-    log::info!("Initialized PM sensor, waiting 30s to initialize");
+    let mut controller = sensors::pm::ParticulateMatterSensor::new(pms7003_uart, pms7003_timer);
+    controller.init();
 
-    let mut timer = time::with_timer_mut(|t| t.alarm_3().unwrap()).unwrap();
-    let _ = timer.schedule(32.secs());
+    // let pms_cmd_passive = [0x42, 0x4d, 0xe1, 0x00, 0x00, 0x01, 0x70];
+    // let pms_cmd_passive_read = [0x42, 0x4d, 0xe2, 0x00, 0x00, 0x01, 0x71];
+    // let pms_cmd_wake = [0x42, 0x4d, 0xe4, 0x00, 0x01, 0x01, 0x74];
+    // let pms_cmd_sleep = [0x42, 0x4d, 0xe4, 0x00, 0x00, 0x01, 0x73];
+    // let mut pms_resp = [0; 32];
+
+    // let mut pms7003 = hal::uart::UartPeripheral::new(
+    //     pac.UART0,
+    //     (pins.gpio0.into_function(), pins.gpio1.into_function()),
+    //     &mut pac.RESETS,
+    // )
+    // .enable(
+    // hal::uart::UartConfig::new(
+    //     9600.Hz(),
+    //     hal::uart::DataBits::Eight,
+    //     None,
+    //     hal::uart::StopBits::One,
+    // ),
+    // clocks.peripheral_clock.freq(),
+    // )
+    // .unwrap();
+
+    // pms7003.write_full_blocking(&pms_cmd_wake);
+    // pms7003.write_full_blocking(&pms_cmd_passive);
+    // log::info!("Initialized PM sensor, waiting 30s to initialize");
+
+    // let mut timer = time::with_timer_mut(|t| t.alarm_3().unwrap()).unwrap();
+    // let _ = timer.schedule(32.secs());
 
     watchdog.start(100.millis());
     loop {
         usb.poll();
         status.in_loop();
 
-        if timer.finished() {
-            timer.clear_interrupt();
-            pms7003.write_full_blocking(&pms_cmd_passive_read);
-            let _ = pms7003.read_full_blocking(&mut pms_resp);
-            pms7003.write_full_blocking(&pms_cmd_sleep);
-
-            log::info!("Got dump: {:x?}", pms_resp);
+        match controller.try_read() {
+            Ok(data) => {
+                info!(
+                    "PM1.0: {}, PM2.5: {}, PM10: {}",
+                    data.pm1_0_atm, data.pm2_5_atm, data.pm10_atm
+                );
+            }
+            Err(err) => match err {
+                pms7003_rs::Error::Write(err) => {
+                    error!("Controller Write Error: {}", err);
+                }
+                pms7003_rs::Error::Conversion => {
+                    error!("Failed to interpret data frame")
+                }
+                pms7003_rs::Error::WarmUp => (),
+            },
         }
+
+        // if timer.finished() {
+        //     timer.clear_interrupt();
+        //     pms7003.write_full_blocking(&pms_cmd_passive_read);
+        //     let _ = pms7003.read_full_blocking(&mut pms_resp);
+        //     pms7003.write_full_blocking(&pms_cmd_sleep);
+
+        //     log::info!("Got dump: {:x?}", pms_resp);
+        // }
 
         logging::flush_logs(&mut usb.logger);
         watchdog.feed();
