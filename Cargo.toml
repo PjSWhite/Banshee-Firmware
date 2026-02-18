@@ -1,5 +1,5 @@
 [package]
-name = "rp2040_blinky"
+name = "banshee"
 version = "0.1.0"
 edition = "2024"
 
@@ -22,7 +22,7 @@ lto = true
 opt-level = "z"
 
 [[bin]]
-name = "rp2040_blinky"
+name = "banshee"
 path = "src/main.rs"
 test = false
 doctest = false
