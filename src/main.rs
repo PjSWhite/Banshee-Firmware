@@ -1,16 +1,23 @@
 #![no_std]
 #![no_main]
 
+use embedded_hal::digital::OutputPin;
 use rp2040_hal as hal;
 
 mod panic;
+
+#[used]
+#[unsafe(link_section = ".boot2")]
+static BOOTLADER: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
+
+const CLOCK_SPEED: u32 = 12_000_000;
 
 #[hal::entry]
 unsafe fn main() -> ! {
     let mut pac = hal::pac::Peripherals::take().unwrap();
     let mut watchdog = hal::Watchdog::new(pac.WATCHDOG);
     let clocks = hal::clocks::init_clocks_and_plls(
-        12_000_000,
+        CLOCK_SPEED,
         pac.XOSC,
         pac.CLOCKS,
         pac.PLL_SYS,
@@ -29,9 +36,13 @@ unsafe fn main() -> ! {
         &mut pac.RESETS,
     );
 
-    panic::set_panic_buzzer(pins.gpio15.into_push_pull_output());
+    let mut heartbeat = pins.gpio25.into_push_pull_output();
+
+    // panic!("this is test");
 
     loop {
-        cortex_m::asm::nop();
+        heartbeat.set_high().ok();
+        // cortex_m::asm::nop();
+        heartbeat.set_low().ok();
     }
 }
