@@ -8,7 +8,7 @@ mod panic;
 
 #[used]
 #[unsafe(link_section = ".boot2")]
-static BOOTLADER: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
+static BOOTLOADER: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 
 const CLOCK_SPEED: u32 = 12_000_000;
 
