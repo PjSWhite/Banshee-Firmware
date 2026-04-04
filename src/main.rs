@@ -3,7 +3,9 @@
 
 use embedded_hal::digital::OutputPin;
 use rp2040_hal as hal;
+use usbd_serial::embedded_io::Write;
 
+// mod logging;
 mod panic;
 mod usb;
 
@@ -60,21 +62,29 @@ unsafe fn main() -> ! {
     // routine in the panic handler so we can
     // extract the panic message?
     usb::init_usb(usb_bus).unwrap();
+    // logging::init_logger(log::LevelFilter::Info);
 
     unsafe { hal::pac::NVIC::unmask(hal::pac::interrupt::USBCTRL_IRQ) };
+    // log::info!("Ready");
+
+    let mut printed: u8 = 0;
     loop {
         heartbeat.set_high().ok();
 
-        // if let Some(logger) = usb::LOGGER.get() {
-        //     critical_section::with(|cs| {
-        //         let mut logger = logger.borrow_ref_mut(cs);
+        if let Some(logger_mutex) = usb::LOGGER.get() {
+            critical_section::with(|cs| {
+                let mut logger_svc = logger_mutex.borrow_ref_mut(cs);
 
-        //         if logger.serial.dtr() {
-        //             logger.serial.write(b"Hello world!\n\r").unwrap();
-        //             logger.serial.flush().unwrap();
-        //         }
-        //     })
-        // }
+                if logger_svc.ready() {
+                    let msg = format_args!("Hello world! This was printed {} time(s)\n", printed);
+                    logger_svc.serial.write_fmt(msg);
+                    printed = printed.saturating_add(1);
+
+                    // logging::flush_logs(&mut logger_svc.serial);
+                }
+            })
+        }
+
         cortex_m::asm::delay(12_000_000); // ~96ms pause between messages
         heartbeat.set_low().ok();
     }

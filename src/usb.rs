@@ -37,6 +37,10 @@ impl<'a> UsbLogger<'a> {
     fn poll(&mut self) -> bool {
         self.device.poll(&mut [&mut self.serial])
     }
+
+    pub fn ready(&self) -> bool {
+        self.serial.dtr()
+    }
 }
 
 pub fn init_usb(bus: UsbBus) -> Option<()> {
