@@ -80,7 +80,7 @@ unsafe fn main() -> ! {
                     logger_svc.serial.write_fmt(msg);
                     printed = printed.saturating_add(1);
 
-                    // logging::flush_logs(&mut logger_svc.serial);
+                    // logging::flush_logs(&mut logger_svc.serial, cs);
                 }
             })
         }

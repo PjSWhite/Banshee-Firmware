@@ -1,18 +1,20 @@
 use core::cell::RefCell;
 use core::fmt::Write as FmtWrite;
 
-use critical_section::Mutex;
+use critical_section::{CriticalSection, Mutex};
 use heapless::{Deque, String, Vec};
 use log::{Level, LevelFilter, Log, Record};
 use once_cell::sync::OnceCell;
 use rp2040_hal::usb::UsbBus;
+use static_cell::StaticCell;
 use usbd_serial::{SerialPort, embedded_io::Write as IoWrite};
 
 // 264 KB RAM * 45% hard limit = 119 KB
 // 300 bytes = 119 KB = 396 records max
 const LOG_BUFFER_CAPACITY: usize = 396;
 
-static GLOBAL_LOGGER: OnceCell<Mutex<RefCell<SerialLogger>>> = OnceCell::new();
+static GLOBAL_LOGGER_STORAGE: StaticCell<Mutex<RefCell<SerialLogger>>> = StaticCell::new();
+static GLOBAL_LOGGER: OnceCell<&'static mut Mutex<RefCell<SerialLogger>>> = OnceCell::new();
 static LOGGING_SERVICE: UsbSerialLogger = UsbSerialLogger;
 
 // 300 bytes
@@ -86,34 +88,34 @@ impl Log for UsbSerialLogger {
     fn flush(&self) {}
 }
 
-pub fn init_logger(level: LevelFilter) {
-    GLOBAL_LOGGER.get_or_init(|| {
-        Mutex::new(RefCell::new(SerialLogger {
-            level,
-            logs: Deque::new(),
-        }))
-    });
+pub fn init_logger(level: LevelFilter) -> Option<()> {
+    let global_logger = GLOBAL_LOGGER_STORAGE.init(Mutex::new(RefCell::new(SerialLogger {
+        level,
+        logs: Deque::new(),
+    })));
+
+    GLOBAL_LOGGER.set(global_logger).ok()?;
 
     unsafe {
         if let Ok(()) = log::set_logger_racy(&LOGGING_SERVICE) {
             log::set_max_level_racy(level);
         }
     }
+
+    Some(())
 }
 
-pub fn flush_logs<'a>(serial: &mut SerialPort<'a, UsbBus>) {
+pub fn flush_logs<'a, 'b>(serial: &mut SerialPort<'a, UsbBus>, cs: CriticalSection<'b>) {
     let mut output_queue: Vec<SerialLogRecord, LOG_BUFFER_CAPACITY> = Vec::new();
 
     if let Some(logger_mutex) = GLOBAL_LOGGER.get() {
-        critical_section::with(|cs| {
-            while let Some(record) = logger_mutex.borrow_ref_mut(cs).logs.pop_front() {
-                // Safe to ignore, since this cannot fail
-                // We structured our output queue to have
-                // the same capacity as the record queue,
-                // therefore there is no chance for the
-                output_queue.push(record).ok();
-            }
-        })
+        while let Some(record) = logger_mutex.borrow_ref_mut(cs).logs.pop_front() {
+            // Safe to ignore, since this cannot fail
+            // We structured our output queue to have
+            // the same capacity as the record queue,
+            // therefore there is no chance for the
+            output_queue.push(record).ok();
+        }
     }
 
     for record in output_queue {
