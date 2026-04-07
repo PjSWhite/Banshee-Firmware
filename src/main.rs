@@ -10,6 +10,8 @@ use rp2040_hal as hal;
 use sgp40::Sgp40;
 use usbd_serial::embedded_io::Write;
 
+use defmt as _;
+
 mod logging;
 mod panic;
 mod usb;
@@ -131,7 +133,7 @@ unsafe fn main() -> ! {
             })
         }
 
-        // defmt::info!("Hello world!");
+        defmt::info!("Hello world!");
         timer.delay_ms(1000);
         // cortex_m::asm::delay(12_000_000); // ~96ms pause between messages
         heartbeat.set_low().ok();

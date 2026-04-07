@@ -1,127 +1,51 @@
-use core::cell::RefCell;
-use core::fmt::Write as FmtWrite;
+use portable_atomic::{AtomicBool, Ordering};
 
-use critical_section::{CriticalSection, Mutex};
-use heapless::{Deque, String, Vec};
-use log::{Level, LevelFilter, Log, Record};
-use once_cell::sync::OnceCell;
-use rp2040_hal::usb::UsbBus;
-use static_cell::StaticCell;
-use usbd_serial::{SerialPort, embedded_io::Write as IoWrite};
+static TAKEN: AtomicBool = AtomicBool::new(false);
+static mut ENCODER: defmt::Encoder = defmt::Encoder::new();
 
-// 264 KB RAM * 45% hard limit = 119 KB
-// 300 bytes = 119 KB = 396 records max
-const LOG_BUFFER_CAPACITY: usize = 396;
+#[defmt::global_logger]
+struct UsbDefmtLogger;
 
-static GLOBAL_LOGGER_STORAGE: StaticCell<Mutex<RefCell<SerialLogger>>> = StaticCell::new();
-static GLOBAL_LOGGER: OnceCell<&'static mut Mutex<RefCell<SerialLogger>>> = OnceCell::new();
-static LOGGING_SERVICE: UsbSerialLogger = UsbSerialLogger;
-
-// 300 bytes
-struct SerialLogRecord {
-    // time_ms: u64,
-    level: Level,
-    target: String<32>,
-    message: String<256>,
-}
-
-struct SerialLogger {
-    level: LevelFilter,
-    logs: Deque<SerialLogRecord, LOG_BUFFER_CAPACITY>,
-}
-
-struct UsbSerialLogger;
-
-impl Log for UsbSerialLogger {
-    fn enabled(&self, metadata: &log::Metadata) -> bool {
-        if let Some(logger_mutex) = GLOBAL_LOGGER.get() {
-            critical_section::with(|cs| {
-                logger_mutex
-                    .borrow(cs)
-                    .borrow()
-                    .level
-                    .to_level()
-                    .map(|l| l <= metadata.level())
-                    .unwrap_or(false)
-            })
-        } else {
-            false
+#[allow(static_mut_refs)]
+unsafe impl defmt::Logger for UsbDefmtLogger {
+    fn acquire() {
+        // disable interrupts, claim the encoder
+        cortex_m::interrupt::disable();
+        if TAKEN.load(Ordering::Relaxed) {
+            panic!("defmt logger already acquired");
         }
+        TAKEN.store(true, Ordering::Relaxed);
+        unsafe { ENCODER.start_frame(write_encoded) };
     }
 
-    fn log(&self, record: &Record) {
-        if !self.enabled(record.metadata()) {
-            return;
-        }
+    unsafe fn flush() {}
 
-        let mut message = String::new();
-        let _ = write!(&mut message, "{}", record.args());
-
-        let target_raw = record.target();
-        let mut target = String::new();
-
-        if target_raw.len() <= target.capacity() {
-            let _ = target.push_str(target_raw);
-        } else {
-            let available = target.capacity().saturating_sub(4);
-            let _ = writeln!(&mut target, "{}...", &target_raw[..available]);
-        }
-
-        let new_record = SerialLogRecord {
-            level: record.level(),
-            target,
-            message,
-        };
-
-        if let Some(logger_mutex) = GLOBAL_LOGGER.get() {
-            critical_section::with(|cs| {
-                logger_mutex
-                    .borrow(cs)
-                    .borrow_mut()
-                    .logs
-                    .push_back(new_record)
-                    .ok();
-            })
-        }
+    unsafe fn release() {
+        unsafe { ENCODER.end_frame(write_encoded) };
+        TAKEN.store(false, Ordering::Relaxed);
+        unsafe { cortex_m::interrupt::enable() };
     }
 
-    fn flush(&self) {}
-}
-
-pub fn init_logger(level: LevelFilter) -> Option<()> {
-    let global_logger = GLOBAL_LOGGER_STORAGE.init(Mutex::new(RefCell::new(SerialLogger {
-        level,
-        logs: Deque::new(),
-    })));
-
-    GLOBAL_LOGGER.set(global_logger).ok()?;
-
-    unsafe {
-        if let Ok(()) = log::set_logger_racy(&LOGGING_SERVICE) {
-            log::set_max_level_racy(level);
-        }
-    }
-
-    Some(())
-}
-
-pub fn flush_logs<'a, 'b>(serial: &mut SerialPort<'a, UsbBus>, cs: CriticalSection<'b>) {
-    let mut output_queue: Vec<SerialLogRecord, LOG_BUFFER_CAPACITY> = Vec::new();
-
-    if let Some(logger_mutex) = GLOBAL_LOGGER.get() {
-        while let Some(record) = logger_mutex.borrow_ref_mut(cs).logs.pop_front() {
-            // Safe to ignore, since this cannot fail
-            // We structured our output queue to have
-            // the same capacity as the record queue,
-            // therefore there is no chance for the
-            output_queue.push(record).ok();
-        }
-    }
-
-    for record in output_queue {
-        let formatted_log =
-            format_args!("[{}] <{}> {}", record.target, record.level, record.message);
-
-        serial.write_fmt(formatted_log).ok();
+    unsafe fn write(bytes: &[u8]) {
+        unsafe { ENCODER.write(bytes, write_encoded) };
     }
 }
+
+fn write_encoded(bytes: &[u8]) {
+    if let Some(logger_mutex) = crate::usb::LOGGER.get() {
+        critical_section::with(|cs| {
+            let mut logger = logger_mutex.borrow_ref_mut(cs);
+
+            logger.serial.write(bytes).ok();
+            // if logger.ready() {
+            // }
+        })
+    }
+}
+
+// #[defmt::timestamp]
+// fn timestamp() -> u64 {
+//     // Access the RP2040 timer peripheral
+//     // For a quick test, you can return 0, but logs won't have timing info
+//     0
+// }
