@@ -15,10 +15,13 @@ doctest = false
 bench = false
 
 [dependencies]
+bme280 = "0.5.1"
 cortex-m = "0.7.7"
 cortex-m-rt = "0.7.5"
 critical-section = "1.2.0"
-embedded-hal = "1.0.0"
+defmt = "1.0.1"
+embedded-hal = "1.0.0-alpha.9"
+embedded-hal-bus = "0.3.0"
 heapless = "0.9.2"
 # log = "0.4.29"
 once_cell = { version = "1.21.4", default-features = false, features = [
@@ -27,6 +30,7 @@ once_cell = { version = "1.21.4", default-features = false, features = [
 portable-atomic = { version = "1.13.1", features = ["critical-section"] }
 rp2040-boot2 = "0.3.0"
 rp2040-hal = { version = "0.12.0", features = ["rt", "critical-section-impl"] }
+sgp40 = "1.0.0"
 # static_cell = "2.1.1"
 usb-device = "0.3.2"
 usbd-serial = "0.2.2"
