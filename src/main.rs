@@ -20,12 +20,12 @@ mod usb;
 #[unsafe(link_section = ".boot2")]
 static BOOTLOADER: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 
-type I2cPin<T> = hal::gpio::Pin<T, hal::gpio::FunctionI2C, hal::gpio::PullUp>;
-type I2cPinConfiguration = (
-    I2cPin<hal::gpio::bank0::Gpio4>,
-    I2cPin<hal::gpio::bank0::Gpio5>,
-);
-type I2cBus = hal::I2C<hal::pac::I2C0, I2cPinConfiguration>;
+// type I2cPin<T> = hal::gpio::Pin<T, hal::gpio::FunctionI2C, hal::gpio::PullUp>;
+// type I2cPinConfiguration = (
+//     I2cPin<hal::gpio::bank0::Gpio4>,
+//     I2cPin<hal::gpio::bank0::Gpio5>,
+// );
+// type I2cBus = hal::I2C<hal::pac::I2C0, I2cPinConfiguration>;
 
 // static mut SHARED_DEVICE: Option<
 //     MyDevice<shared_bus::I2cProxy<shared_bus::CortexMMutex<SomeI2cBus>>>,
@@ -126,7 +126,7 @@ unsafe fn main() -> ! {
                         measurements.pressure,
                         voc_index
                     );
-                    logger_svc.serial.write_fmt(msg);
+                    logger_svc.serial.write_fmt(msg).unwrap();
 
                     // logging::flush_logs(&mut logger_svc.serial, cs);
                 }
