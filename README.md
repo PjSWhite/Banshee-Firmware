@@ -22,3 +22,7 @@ the serial monitor:
 ```sh
 picocom --flow none /dev/ttyACM0s
 ```
+
+## Using PuTTY on Banshee
+
+Serial mode with 115200 baud is sufficient for data. As of the time of writing, the baud rate doesnt really matter, since `picocom` can work
