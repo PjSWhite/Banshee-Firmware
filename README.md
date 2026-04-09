@@ -26,3 +26,17 @@ picocom --flow none /dev/ttyACM0s
 ## Using PuTTY on Banshee
 
 Serial mode with 115200 baud is sufficient for data. As of the time of writing, the baud rate doesnt really matter, since `picocom` can work
+
+## Note on fetching errors
+
+During a `panic!()`, the firmware dumps the panic message at a certain region of ram, which can be fetched using [`picotool`](https://github.com/raspberrypi/pico-sdk-tools/releases/latest)
+
+```sh
+picotool save -r 0x15000000 0x15004000 message.bin
+```
+
+or, more succinctly,
+
+```sh
+picotool save -r 0x15000000 0x15004000 message.bin && cat message.bin && rm message.bin
+```

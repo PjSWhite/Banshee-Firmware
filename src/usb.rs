@@ -14,6 +14,7 @@ use rp2040_hal as hal;
 use hal::pac::interrupt;
 use hal::usb::UsbBus;
 
+pub static USB_ALLOCATOR: OnceCell<AllocatorWrapper> = OnceCell::new();
 pub static LOGGER: OnceCell<Mutex<RefCell<UsbLogger<'static>>>> = OnceCell::new();
 
 #[interrupt]
@@ -26,6 +27,17 @@ fn USBCTRL_IRQ() {
         })
     }
 }
+
+/// # THIS IS EXTREMELY RADIOACTIVE
+/// Any interactions with this struct, and
+/// consequently `USB_ALLOCATOR`, **requires
+/// an environment where interrupts are disabled**
+///
+/// Please do take care in
+pub struct AllocatorWrapper(pub *const UsbBusAllocator<UsbBus>);
+
+unsafe impl Sync for AllocatorWrapper {}
+unsafe impl Send for AllocatorWrapper {}
 
 pub struct UsbLogger<'a> {
     pub serial: SerialPort<'a, UsbBus>,
@@ -60,6 +72,9 @@ pub fn init_usb(bus: UsbBus) -> Option<()> {
 
     LOGGER
         .set(Mutex::new(RefCell::new(UsbLogger { serial, device })))
+        .ok()?;
+    USB_ALLOCATOR
+        .set(AllocatorWrapper(alloc as *const _))
         .ok()?;
 
     Some(())
