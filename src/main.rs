@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use core::cell::RefCell;
+use core::{cell::RefCell, fmt::Debug};
 
 use bme280::i2c::BME280;
 use core::fmt::Write as FmtWrite;
@@ -64,6 +64,28 @@ fn render_rhtbp_measurements<E>(
     )
 }
 
+fn render_frame(
+    frame: &[u8],
+    serial_buffer: &mut serial::SerialBuffer,
+) -> Result<(), core::fmt::Error> {
+    for (pos, byte) in frame.iter().enumerate() {
+        write!(serial_buffer, "{:X}", byte)?;
+
+        if pos != frame.len() {
+            write!(serial_buffer, " ")?;
+        }
+    }
+
+    Ok(())
+}
+
+fn render_debug<E: Debug>(
+    val: E,
+    serial_buffer: &mut serial::SerialBuffer,
+) -> Result<(), core::fmt::Error> {
+    write!(serial_buffer, "{:?}", val)
+}
+
 #[hal::entry]
 unsafe fn main() -> ! {
     let mut pac = hal::pac::Peripherals::take().unwrap();
@@ -117,6 +139,22 @@ unsafe fn main() -> ! {
     let pms_alarm = timer.alarm_0().unwrap();
     let mut pms7003 = Pms7003Controller::new(uart, pms_alarm);
 
+    let modbus = hal::uart::UartPeripheral::new(
+        pac.UART1,
+        (pins.gpio8.into_function(), pins.gpio9.into_function()),
+        &mut pac.RESETS,
+    )
+    .enable(
+        UartConfig::new(
+            4800.Hz(),
+            rp2040_hal::uart::DataBits::Eight,
+            None,
+            rp2040_hal::uart::StopBits::One,
+        ),
+        clocks.peripheral_clock.freq(),
+    )
+    .unwrap();
+
     let i2c_device = RefCell::new(hal::I2C::i2c0(
         pac.I2C0,
         pins.gpio4.reconfigure(),
@@ -167,6 +205,8 @@ unsafe fn main() -> ! {
     // log::info!("Ready");
 
     // Wait for sensors to become ready/valid
+    let command: [u8; _] = [0x02, 0x03, 0x00, 0x00, 0x00, 0x01, 0x84, 0x39];
+    let mut response: [u8; _] = [0; 7];
     loop {
         heartbeat.set_high().ok();
         timer.delay_ms(500);
@@ -191,6 +231,13 @@ unsafe fn main() -> ! {
     loop {
         heartbeat.set_high().ok();
         pms7003.flush_data();
+
+        modbus.write_full_blocking(&command);
+        match modbus.read_full_blocking(&mut response) {
+            Ok(()) => render_frame(&response, &mut serial_buffer),
+            Err(err) => render_debug(err, &mut serial_buffer),
+        }
+        .unwrap();
 
         let pms_result = pms7003.read_passive();
         let measurements = bme280.measure(&mut timer).unwrap();
