@@ -4,14 +4,16 @@
 use core::{cell::RefCell, fmt::Debug};
 
 use bme280::i2c::BME280;
+use modbus_rtu::{command::Command, modbus::ModBusRTU};
+use pms7003_rs::Pms7003Controller;
+use sgp40::Sgp40;
+
 use core::fmt::Write as FmtWrite;
 use embedded_hal::{delay::DelayNs, digital::OutputPin};
 use hal::fugit::RateExtU32;
-use pms7003_rs::Pms7003Controller;
 use rp2040_hal::{
     self as hal, fugit::MicrosDurationU32, prelude::*, timer::Alarm, uart::UartConfig,
 };
-use sgp40::Sgp40;
 
 use rp2040_panic_usb_boot as _;
 
@@ -139,7 +141,7 @@ unsafe fn main() -> ! {
     let pms_alarm = timer.alarm_0().unwrap();
     let mut pms7003 = Pms7003Controller::new(uart, pms_alarm);
 
-    let modbus = hal::uart::UartPeripheral::new(
+    let modbus_uart = hal::uart::UartPeripheral::new(
         pac.UART1,
         (pins.gpio8.into_function(), pins.gpio9.into_function()),
         &mut pac.RESETS,
@@ -154,6 +156,7 @@ unsafe fn main() -> ! {
         clocks.peripheral_clock.freq(),
     )
     .unwrap();
+    let mut modbus: ModBusRTU<_, _, 8, 16> = ModBusRTU::new(modbus_uart, timer).unwrap();
 
     let i2c_device = RefCell::new(hal::I2C::i2c0(
         pac.I2C0,
@@ -205,8 +208,8 @@ unsafe fn main() -> ! {
     // log::info!("Ready");
 
     // Wait for sensors to become ready/valid
-    let command: [u8; _] = [0x02, 0x03, 0x00, 0x00, 0x00, 0x01, 0x84, 0x39];
-    let mut response: [u8; _] = [0; 7];
+    // let command: [u8; _] = [0x02, 0x03, 0x00, 0x00, 0x00, 0x01, 0x84, 0x39];
+    // let mut response: [u8; _] = [0; 7];
     loop {
         heartbeat.set_high().ok();
         timer.delay_ms(500);
@@ -232,12 +235,27 @@ unsafe fn main() -> ! {
         heartbeat.set_high().ok();
         pms7003.flush_data();
 
-        modbus.write_full_blocking(&command);
-        match modbus.read_full_blocking(&mut response) {
-            Ok(()) => render_frame(&response, &mut serial_buffer),
+        let command = Command::builder()
+            .slave_address(0x02)
+            .function(modbus_rtu::command::Function::ReadHoldingRegisters {
+                start_address: 0x0000,
+                quantity: 1,
+            })
+            .build();
+
+        match modbus.execute(command) {
+            Ok(bytes) => render_frame(bytes, &mut serial_buffer),
             Err(err) => render_debug(err, &mut serial_buffer),
         }
         .unwrap();
+
+        // modbus.execute(command)
+        // modbus.write_full_blocking(&command);
+        // match modbus.read_full_blocking(&mut response) {
+        //     Ok(()) => render_frame(&response, &mut serial_buffer),
+        //     Err(err) => render_debug(err, &mut serial_buffer),
+        // }
+        // .unwrap();
 
         let pms_result = pms7003.read_passive();
         let measurements = bme280.measure(&mut timer).unwrap();
