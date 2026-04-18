@@ -17,10 +17,6 @@ use rp2040_hal::{
 
 use rp2040_panic_usb_boot as _;
 
-// use defmt as _;
-
-// mod logging;
-// mod panic;
 mod serial;
 mod usb;
 
@@ -28,16 +24,6 @@ mod usb;
 #[unsafe(link_section = ".boot2")]
 static BOOTLOADER: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 
-// type I2cPin<T> = hal::gpio::Pin<T, hal::gpio::FunctionI2C, hal::gpio::PullUp>;
-// type I2cPinConfiguration = (
-//     I2cPin<hal::gpio::bank0::Gpio4>,
-//     I2cPin<hal::gpio::bank0::Gpio5>,
-// );
-// type I2cBus = hal::I2C<hal::pac::I2C0, I2cPinConfiguration>;
-
-// static mut SHARED_DEVICE: Option<
-//     MyDevice<shared_bus::I2cProxy<shared_bus::CortexMMutex<SomeI2cBus>>>,
-// > = None;
 const CLOCK_SPEED: u32 = 12_000_000;
 
 fn render_pm_readings<'a>(
@@ -118,8 +104,6 @@ unsafe fn main() -> ! {
         &mut pac.RESETS,
     );
 
-    // clocks.usb_clock
-
     let mut heartbeat = pins.gpio25.into_push_pull_output();
 
     let uart = hal::uart::UartPeripheral::new(
@@ -188,12 +172,7 @@ unsafe fn main() -> ! {
     // All of these possible ways initialization could
     // fail are all cause by calling usb::init_usb twice
     // in the program flow
-    //
-    // TODO: Probably do another initialization
-    // routine in the panic handler so we can
-    // extract the panic message?
     usb::init_usb(usb_bus).unwrap();
-    // logging::init_logger(log::LevelFilter::Info);
 
     // sensor preparation
     bme280.init(&mut timer).unwrap();
@@ -205,11 +184,7 @@ unsafe fn main() -> ! {
     pms7003.passive().unwrap();
 
     unsafe { hal::pac::NVIC::unmask(hal::pac::interrupt::USBCTRL_IRQ) };
-    // log::info!("Ready");
 
-    // Wait for sensors to become ready/valid
-    // let command: [u8; _] = [0x02, 0x03, 0x00, 0x00, 0x00, 0x01, 0x84, 0x39];
-    // let mut response: [u8; _] = [0; 7];
     loop {
         heartbeat.set_high().ok();
         timer.delay_ms(500);
@@ -249,14 +224,6 @@ unsafe fn main() -> ! {
         }
         .unwrap();
 
-        // modbus.execute(command)
-        // modbus.write_full_blocking(&command);
-        // match modbus.read_full_blocking(&mut response) {
-        //     Ok(()) => render_frame(&response, &mut serial_buffer),
-        //     Err(err) => render_debug(err, &mut serial_buffer),
-        // }
-        // .unwrap();
-
         let pms_result = pms7003.read_passive();
         let measurements = bme280.measure(&mut timer).unwrap();
         let voc_index = sgp40
@@ -275,8 +242,6 @@ unsafe fn main() -> ! {
             critical_section::with(|cs| {
                 let mut logger_svc = logger_mutex.borrow_ref_mut(cs);
                 if logger_svc.ready() {
-                    // logger_svc.serial.write_fmt(msg).unwrap();
-
                     render_rhtbp_measurements(&measurements, &mut serial_buffer).unwrap();
                     write!(&mut serial_buffer, "; ").unwrap();
                     render_pm_readings(pms_result, &mut serial_buffer).unwrap();
@@ -300,17 +265,12 @@ unsafe fn main() -> ! {
                             panic!("Error: {err:?}");
                         }
                     };
-
-                    // let frame_dump = format_args!("Frame Dump:\n\r{}",);
-                    // logging::flush_logs(&mut logger_svc.serial, cs);
                 }
             })
         }
 
         serial_buffer.clear();
-        // defmt::info!("Hello world!");
         timer.delay_ms(1000);
-        // cortex_m::asm::delay(12_000_000); // ~96ms pause between messages
         heartbeat.set_low().ok();
     }
 }
