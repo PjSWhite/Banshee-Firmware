@@ -4,7 +4,7 @@
 use core::{cell::RefCell, fmt::Debug};
 
 use bme280::i2c::BME280;
-use modbus_rtu::{command::Command, modbus::ModBusRTU};
+// use modbus_rtu::{command::Command, modbus::ModBusRTU};
 use pms7003_rs::Pms7003Controller;
 use sgp40::Sgp40;
 
@@ -91,6 +91,7 @@ unsafe fn main() -> ! {
     .unwrap();
     let mut timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
     let mut cold_start_alarm = timer.alarm_3().unwrap();
+    let mut thirty_minutes = timer.alarm_2().unwrap();
 
     cold_start_alarm
         .schedule(MicrosDurationU32::secs(60))
@@ -125,22 +126,22 @@ unsafe fn main() -> ! {
     let pms_alarm = timer.alarm_0().unwrap();
     let mut pms7003 = Pms7003Controller::new(uart, pms_alarm);
 
-    let modbus_uart = hal::uart::UartPeripheral::new(
-        pac.UART1,
-        (pins.gpio8.into_function(), pins.gpio9.into_function()),
-        &mut pac.RESETS,
-    )
-    .enable(
-        UartConfig::new(
-            4800.Hz(),
-            rp2040_hal::uart::DataBits::Eight,
-            None,
-            rp2040_hal::uart::StopBits::One,
-        ),
-        clocks.peripheral_clock.freq(),
-    )
-    .unwrap();
-    let mut modbus: ModBusRTU<_, _, 8, 16> = ModBusRTU::new(modbus_uart, timer).unwrap();
+    // let modbus_uart = hal::uart::UartPeripheral::new(
+    //     pac.UART1,
+    //     (pins.gpio8.into_function(), pins.gpio9.into_function()),
+    //     &mut pac.RESETS,
+    // )
+    // .enable(
+    //     UartConfig::new(
+    //         4800.Hz(),
+    //         rp2040_hal::uart::DataBits::Eight,
+    //         None,
+    //         rp2040_hal::uart::StopBits::One,
+    //     ),
+    //     clocks.peripheral_clock.freq(),
+    // )
+    // .unwrap();
+    // let mut modbus: ModBusRTU<_, _, 8, 16> = ModBusRTU::new(modbus_uart, timer).unwrap();
 
     let i2c_device = RefCell::new(hal::I2C::i2c0(
         pac.I2C0,
@@ -210,19 +211,19 @@ unsafe fn main() -> ! {
         heartbeat.set_high().ok();
         pms7003.flush_data();
 
-        let command = Command::builder()
-            .slave_address(0x02)
-            .function(modbus_rtu::command::Function::ReadHoldingRegisters {
-                start_address: 0x0000,
-                quantity: 1,
-            })
-            .build();
+        // let command = Command::builder()
+        //     .slave_address(0x02)
+        //     .function(modbus_rtu::command::Function::ReadHoldingRegisters {
+        //         start_address: 0x0000,
+        //         quantity: 1,
+        //     })
+        //     .build();
 
-        match modbus.execute(command) {
-            Ok(bytes) => render_frame(bytes, &mut serial_buffer),
-            Err(err) => render_debug(err, &mut serial_buffer),
-        }
-        .unwrap();
+        // match modbus.execute(command) {
+        //     Ok(bytes) => render_frame(bytes, &mut serial_buffer),
+        //     Err(err) => render_debug(err, &mut serial_buffer),
+        // }
+        // .unwrap();
 
         let pms_result = pms7003.read_passive();
         let measurements = bme280.measure(&mut timer).unwrap();
