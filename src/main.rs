@@ -17,6 +17,12 @@ use rp2040_hal::{
 
 use rp2040_panic_usb_boot as _;
 
+use crate::{
+    sensor::{SensorReadingAverager, SensorReadings},
+    serial::SerialBuffer,
+};
+
+mod sensor;
 mod serial;
 mod usb;
 
@@ -27,7 +33,7 @@ static BOOTLOADER: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 const CLOCK_SPEED: u32 = 12_000_000;
 
 fn render_pm_readings<'a>(
-    pms_result: pms7003_rs::DataFrameResult<'a>,
+    pms_result: &pms7003_rs::DataFrameResult<'a>,
     serial_buffer: &mut serial::SerialBuffer,
 ) -> Result<(), core::fmt::Error> {
     if let Ok(reading) = pms_result {
@@ -37,7 +43,11 @@ fn render_pm_readings<'a>(
             reading.pm1_0_atm, reading.pm2_5_atm, reading.pm10_atm
         )
     } else {
-        write!(serial_buffer, " PMS: {:?}", pms_result.unwrap_err())
+        write!(
+            serial_buffer,
+            " PMS: {:?}",
+            pms_result.as_ref().unwrap_err()
+        )
     }
 }
 
@@ -91,7 +101,8 @@ unsafe fn main() -> ! {
     .unwrap();
     let mut timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
     let mut cold_start_alarm = timer.alarm_3().unwrap();
-    let mut thirty_minutes = timer.alarm_2().unwrap();
+    let thirty_minutes = timer.alarm_2().unwrap();
+    let mut sensor_averager = SensorReadingAverager::new(thirty_minutes);
 
     cold_start_alarm
         .schedule(MicrosDurationU32::secs(60))
@@ -206,24 +217,11 @@ unsafe fn main() -> ! {
         }
     }
 
+    sensor_averager.arm();
     let mut serial_buffer = serial::SerialBuffer::default();
     loop {
         heartbeat.set_high().ok();
         pms7003.flush_data();
-
-        // let command = Command::builder()
-        //     .slave_address(0x02)
-        //     .function(modbus_rtu::command::Function::ReadHoldingRegisters {
-        //         start_address: 0x0000,
-        //         quantity: 1,
-        //     })
-        //     .build();
-
-        // match modbus.execute(command) {
-        //     Ok(bytes) => render_frame(bytes, &mut serial_buffer),
-        //     Err(err) => render_debug(err, &mut serial_buffer),
-        // }
-        // .unwrap();
 
         let pms_result = pms7003.read_passive();
         let measurements = bme280.measure(&mut timer).unwrap();
@@ -245,7 +243,7 @@ unsafe fn main() -> ! {
                 if logger_svc.ready() {
                     render_rhtbp_measurements(&measurements, &mut serial_buffer).unwrap();
                     write!(&mut serial_buffer, "; ").unwrap();
-                    render_pm_readings(pms_result, &mut serial_buffer).unwrap();
+                    render_pm_readings(&pms_result, &mut serial_buffer).unwrap();
                     write!(&mut serial_buffer, "; ").unwrap();
 
                     match voc_index {
@@ -257,6 +255,39 @@ unsafe fn main() -> ! {
                         }
                     }
                     .unwrap();
+
+                    sensor_averager.add_reading(SensorReadings {
+                        bpres: measurements.pressure,
+                        tempe: measurements.temperature,
+                        humid: measurements.humidity,
+
+                        pm1_0: pms_result
+                            .as_ref()
+                            .map(|r| r.pm1_0_atm.get() as f32)
+                            .unwrap_or_default(),
+
+                        pm2_5: pms_result
+                            .as_ref()
+                            .map(|r| r.pm2_5_atm.get() as f32)
+                            .unwrap_or_default(),
+                        pm_10: pms_result
+                            .as_ref()
+                            .map(|r| r.pm10_atm.get() as f32)
+                            .unwrap_or_default(),
+                    });
+                    // write!(&mut serial_buffer, "; ").unwrap();
+                    logger_svc.serial.write(serial_buffer.buffer()).unwrap();
+                    logger_svc.serial.write(b"\r\n").unwrap();
+                    match logger_svc.serial.flush() {
+                        Ok(_) | Err(usb_device::UsbError::WouldBlock) => (),
+                        Err(err) => {
+                            panic!("Error: {err:?}");
+                        }
+                    };
+
+                    if let Some(report) = sensor_averager.report() {
+                        render_debug(report, &mut serial_buffer).unwrap();
+                    }
 
                     logger_svc.serial.write(serial_buffer.buffer()).unwrap();
                     logger_svc.serial.write(b"\r\n").unwrap();
