@@ -1,9 +1,9 @@
-pub struct SerialBuffer<const SIZE: usize = 256> {
+pub struct SerialBuffer<const SIZE: usize> {
     data: [u8; SIZE],
     cursor: usize,
 }
 
-impl SerialBuffer {
+impl<const SIZE: usize> SerialBuffer<SIZE> {
     pub fn buffer(&self) -> &[u8] {
         &self.data[..self.cursor]
     }
@@ -22,7 +22,7 @@ impl<const SIZE: usize> Default for SerialBuffer<SIZE> {
     }
 }
 
-impl core::fmt::Write for SerialBuffer {
+impl<const SIZE: usize> core::fmt::Write for SerialBuffer<SIZE> {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         let bytes = s.as_bytes();
         let remaining = &mut self.data[self.cursor..];
