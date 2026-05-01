@@ -1,26 +1,17 @@
 #![no_std]
 #![no_main]
-
-use core::{cell::RefCell, fmt::Debug};
-
-use bme280::i2c::BME280;
-// use modbus_rtu::{command::Command, modbus::ModBusRTU};
-use pms7003_rs::Pms7003Controller;
-use sgp40::Sgp40;
-
 use core::fmt::Write as FmtWrite;
-use embedded_hal::{delay::DelayNs, digital::OutputPin};
-use hal::fugit::RateExtU32;
-use rp2040_hal::{
-    self as hal, fugit::MicrosDurationU32, prelude::*, timer::Alarm, uart::UartConfig,
-};
 
+use embedded_hal::delay::DelayNs;
+use rp2040_hal as hal;
+use rp2040_hal::Clock;
+use rp2040_hal::fugit::RateExtU32 as _;
 use rp2040_panic_usb_boot as _;
 
-use crate::{
-    sensor::{SensorReadingAverager, SensorReadings},
-    serial::SerialBuffer,
-};
+use sx127x_lora::LoRa;
+use sx127x_lora::MODE;
+
+use crate::serial::SerialBuffer;
 
 mod sensor;
 mod serial;
@@ -31,58 +22,6 @@ mod usb;
 static BOOTLOADER: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 
 const CLOCK_SPEED: u32 = 12_000_000;
-
-fn render_pm_readings<'a>(
-    pms_result: &pms7003_rs::DataFrameResult<'a>,
-    serial_buffer: &mut serial::SerialBuffer,
-) -> Result<(), core::fmt::Error> {
-    if let Ok(reading) = pms_result {
-        write!(
-            serial_buffer,
-            "PM1.0: {} ug/m3; PM2.5: {} ug/m3; PM10: {} ug/m3",
-            reading.pm1_0_atm, reading.pm2_5_atm, reading.pm10_atm
-        )
-    } else {
-        write!(
-            serial_buffer,
-            " PMS: {:?}",
-            pms_result.as_ref().unwrap_err()
-        )
-    }
-}
-
-fn render_rhtbp_measurements<E>(
-    measurements: &bme280::Measurements<E>,
-    serial_buffer: &mut serial::SerialBuffer,
-) -> Result<(), core::fmt::Error> {
-    write!(
-        serial_buffer,
-        "T: {} deg C; RH: {} %; P: {} Pa",
-        measurements.temperature, measurements.humidity, measurements.pressure,
-    )
-}
-
-fn render_frame(
-    frame: &[u8],
-    serial_buffer: &mut serial::SerialBuffer,
-) -> Result<(), core::fmt::Error> {
-    for (pos, byte) in frame.iter().enumerate() {
-        write!(serial_buffer, "{:X}", byte)?;
-
-        if pos != frame.len() {
-            write!(serial_buffer, " ")?;
-        }
-    }
-
-    Ok(())
-}
-
-fn render_debug<E: Debug>(
-    val: E,
-    serial_buffer: &mut serial::SerialBuffer,
-) -> Result<(), core::fmt::Error> {
-    write!(serial_buffer, "{:?}", val)
-}
 
 #[hal::entry]
 unsafe fn main() -> ! {
@@ -100,13 +39,6 @@ unsafe fn main() -> ! {
     .ok()
     .unwrap();
     let mut timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
-    let mut cold_start_alarm = timer.alarm_3().unwrap();
-    let thirty_minutes = timer.alarm_2().unwrap();
-    let mut sensor_averager = SensorReadingAverager::new(thirty_minutes);
-
-    cold_start_alarm
-        .schedule(MicrosDurationU32::secs(60))
-        .unwrap();
 
     let sio = hal::Sio::new(pac.SIO);
     let pins = hal::gpio::Pins::new(
@@ -116,57 +48,23 @@ unsafe fn main() -> ! {
         &mut pac.RESETS,
     );
 
-    let mut heartbeat = pins.gpio25.into_push_pull_output();
+    let lora_miso = pins.gpio16.into_function::<hal::gpio::FunctionSpi>();
+    let lora_mosi = pins.gpio19.into_function::<hal::gpio::FunctionSpi>();
+    let lora_sclk = pins.gpio18.into_function::<hal::gpio::FunctionSpi>();
+    let lora_csel = pins
+        .gpio17
+        .into_push_pull_output_in_state(rp2040_hal::gpio::PinState::High);
+    let lora_rset = pins
+        .gpio20
+        .into_push_pull_output_in_state(rp2040_hal::gpio::PinState::High);
 
-    let uart = hal::uart::UartPeripheral::new(
-        pac.UART0,
-        (pins.gpio0.into_function(), pins.gpio1.into_function()),
+    let lora_spi = hal::Spi::<_, _, _, 8>::new(pac.SPI0, (lora_mosi, lora_miso, lora_sclk)).init(
         &mut pac.RESETS,
-    )
-    .enable(
-        UartConfig::new(
-            9600.Hz(),
-            rp2040_hal::uart::DataBits::Eight,
-            None,
-            rp2040_hal::uart::StopBits::One,
-        ),
         clocks.peripheral_clock.freq(),
-    )
-    .unwrap();
-
-    let pms_alarm = timer.alarm_0().unwrap();
-    let mut pms7003 = Pms7003Controller::new(uart, pms_alarm);
-
-    // let modbus_uart = hal::uart::UartPeripheral::new(
-    //     pac.UART1,
-    //     (pins.gpio8.into_function(), pins.gpio9.into_function()),
-    //     &mut pac.RESETS,
-    // )
-    // .enable(
-    //     UartConfig::new(
-    //         4800.Hz(),
-    //         rp2040_hal::uart::DataBits::Eight,
-    //         None,
-    //         rp2040_hal::uart::StopBits::One,
-    //     ),
-    //     clocks.peripheral_clock.freq(),
-    // )
-    // .unwrap();
-    // let mut modbus: ModBusRTU<_, _, 8, 16> = ModBusRTU::new(modbus_uart, timer).unwrap();
-
-    let i2c_device = RefCell::new(hal::I2C::i2c0(
-        pac.I2C0,
-        pins.gpio4.reconfigure(),
-        pins.gpio5.reconfigure(),
-        400.kHz(),
-        &mut pac.RESETS,
-        &clocks.system_clock,
-    ));
-    let mut i2c_bme280 = embedded_hal_bus::i2c::RefCellDevice::new(&i2c_device);
-    let mut i2c_sgp40 = embedded_hal_bus::i2c::RefCellDevice::new(&i2c_device);
-
-    let mut sgp40 = Sgp40::new(&mut i2c_sgp40, 0x59, timer);
-    let mut bme280 = BME280::new_primary(&mut i2c_bme280);
+        1_000_000u32.Hz(),
+        MODE,
+    );
+    let mut lora = LoRa::new(lora_spi, lora_csel, lora_rset, 433, timer).unwrap();
 
     let usb_bus = hal::usb::UsbBus::new(
         pac.USBCTRL_REGS,
@@ -186,123 +84,24 @@ unsafe fn main() -> ! {
     // in the program flow
     usb::init_usb(usb_bus).unwrap();
 
-    // sensor preparation
-    bme280.init(&mut timer).unwrap();
-
-    pms7003.sleep().unwrap();
-    timer.delay_ms(500);
-    pms7003.wake().unwrap();
-    timer.delay_ms(500);
-    pms7003.passive().unwrap();
+    lora.set_tx_power(17, 1).unwrap();
 
     unsafe { hal::pac::NVIC::unmask(hal::pac::interrupt::USBCTRL_IRQ) };
 
+    // let mut serial_buffer = ser
+    let mut lora_packet = SerialBuffer::<255>::default();
+    let mut packet_number: u32 = 0;
     loop {
-        heartbeat.set_high().ok();
-        timer.delay_ms(500);
+        write!(
+            &mut lora_packet,
+            "Hello world! This packet number {}",
+            packet_number
+        )
+        .unwrap();
 
-        if cold_start_alarm.finished() {
-            break;
-        }
-
-        heartbeat.set_low().ok();
-        timer.delay_ms(500);
-
-        if let Some(logger_mutex) = usb::LOGGER.get() {
-            critical_section::with(|cs| {
-                let mut logger = logger_mutex.borrow_ref_mut(cs);
-
-                logger.serial.write(b"System Warmup\r\n").ok();
-            })
-        }
-    }
-
-    sensor_averager.arm();
-    let mut serial_buffer = serial::SerialBuffer::default();
-    loop {
-        heartbeat.set_high().ok();
-        pms7003.flush_data();
-
-        let pms_result = pms7003.read_passive();
-        let measurements = bme280.measure(&mut timer).unwrap();
-        let voc_index = sgp40
-            .measure_raw_with_rht(
-                (measurements.humidity * 1000.0) as u16,
-                (measurements.temperature * 1000.0) as i16,
-            )
-            .and_then(|_| {
-                sgp40.measure_voc_index_with_rht(
-                    (measurements.humidity * 1000.0) as u16,
-                    (measurements.temperature * 1000.0) as i16,
-                )
-            });
-
-        if let Some(logger_mutex) = usb::LOGGER.get() {
-            critical_section::with(|cs| {
-                let mut logger_svc = logger_mutex.borrow_ref_mut(cs);
-                if logger_svc.ready() {
-                    render_rhtbp_measurements(&measurements, &mut serial_buffer).unwrap();
-                    write!(&mut serial_buffer, "; ").unwrap();
-                    render_pm_readings(&pms_result, &mut serial_buffer).unwrap();
-                    write!(&mut serial_buffer, "; ").unwrap();
-
-                    match voc_index {
-                        Ok(voc) => {
-                            write!(&mut serial_buffer, "VOC: {}", voc)
-                        }
-                        Err(err) => {
-                            write!(&mut serial_buffer, "VOC ERROR: {:?}", err)
-                        }
-                    }
-                    .unwrap();
-
-                    sensor_averager.add_reading(SensorReadings {
-                        bpres: measurements.pressure,
-                        tempe: measurements.temperature,
-                        humid: measurements.humidity,
-
-                        pm1_0: pms_result
-                            .as_ref()
-                            .map(|r| r.pm1_0_atm.get() as f32)
-                            .unwrap_or_default(),
-
-                        pm2_5: pms_result
-                            .as_ref()
-                            .map(|r| r.pm2_5_atm.get() as f32)
-                            .unwrap_or_default(),
-                        pm_10: pms_result
-                            .as_ref()
-                            .map(|r| r.pm10_atm.get() as f32)
-                            .unwrap_or_default(),
-                    });
-                    // write!(&mut serial_buffer, "; ").unwrap();
-                    logger_svc.serial.write(serial_buffer.buffer()).unwrap();
-                    logger_svc.serial.write(b"\r\n").unwrap();
-                    match logger_svc.serial.flush() {
-                        Ok(_) | Err(usb_device::UsbError::WouldBlock) => (),
-                        Err(err) => {
-                            panic!("Error: {err:?}");
-                        }
-                    };
-
-                    if let Some(report) = sensor_averager.report() {
-                        render_debug(report, &mut serial_buffer).unwrap();
-                    }
-
-                    logger_svc.serial.write(serial_buffer.buffer()).unwrap();
-                    logger_svc.serial.write(b"\r\n").unwrap();
-                    match logger_svc.serial.flush() {
-                        Ok(_) | Err(usb_device::UsbError::WouldBlock) => (),
-                        Err(err) => {
-                            panic!("Error: {err:?}");
-                        }
-                    };
-                }
-            })
-        }
-
-        serial_buffer.clear();
+        packet_number = packet_number.wrapping_add(1);
+        lora.transmit_payload_busy(lora_packet.inner(), lora_packet.len())
+            .unwrap();
         timer.delay_ms(1000);
-        heartbeat.set_low().ok();
     }
 }

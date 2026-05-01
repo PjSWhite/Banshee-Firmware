@@ -11,6 +11,14 @@ impl<const SIZE: usize> SerialBuffer<SIZE> {
     pub fn clear(&mut self) {
         self.cursor = 0;
     }
+
+    pub fn len(&self) -> usize {
+        self.cursor
+    }
+
+    pub fn inner(&self) -> [u8; SIZE] {
+        self.data
+    }
 }
 
 impl<const SIZE: usize> Default for SerialBuffer<SIZE> {
