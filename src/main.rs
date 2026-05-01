@@ -103,5 +103,6 @@ unsafe fn main() -> ! {
         lora.transmit_payload_busy(lora_packet.inner(), lora_packet.len())
             .unwrap();
         timer.delay_ms(1000);
+        lora_packet.clear();
     }
 }
